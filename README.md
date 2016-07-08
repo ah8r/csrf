@@ -1,4 +1,4 @@
-CSRF Scanner Extenstion for Burp Suite Pro
+CSRF Scanner Extension for Burp Suite Pro
 =
 
 Requirements
