@@ -1,5 +1,5 @@
 //    CSRF Scanner Extension for Burp Suite
-//    Copyright (C) 2014  Adrian Hayter
+//    Copyright (C) 2017  Adrian Hayter
 //
 //    This program is free software: you can redistribute it and/or modify
 //    it under the terms of the GNU General Public License as published by
@@ -22,6 +22,8 @@ import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.awt.event.ItemEvent;
+import java.awt.event.ItemListener;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import java.io.ByteArrayInputStream;
@@ -83,6 +85,12 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
     private final String TOKEN_IN_RESPONSE_FORM = "Anti-CSRF token detected in form";
     
     // Defaults
+    private final String[] DEFAULT_METHOD_LIST = {"GET", "POST", "PUT", "DELETE", "PATCH"};
+    private final boolean DEFAULT_GET_METHOD = true;
+    private final boolean DEFAULT_POST_METHOD = true;
+    private final boolean DEFAULT_PUT_METHOD = true;
+    private final boolean DEFAULT_DELETE_METHOD = true;
+    private final boolean DEFAULT_PATCH_METHOD = true;
     private final String[] DEFAULT_TOKEN_LIST = {"Token", "CSRF", "CSRFtoken", "antiCSRF", "__RequestVerificationToken", "RequestVerificationToken", "antiForgery", "Forgery"};
     private final boolean DEFAULT_CASE_INSENSITIVITY = false;
     private final boolean DEFAULT_MIN_TOKEN = true;
@@ -93,6 +101,12 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
     private final boolean DEFAULT_FOUND_TOKEN_FORMS = false;
     
     // Settings
+    private DefaultListModel<String> methods;
+    private JCheckBox getMethod;
+    private JCheckBox postMethod;
+    private JCheckBox putMethod;
+    private JCheckBox deleteMethod;
+    private JCheckBox patchMethod;
     private DefaultListModel<String> tokens;
     private JList tokenList;
     private JCheckBox caseSensitive;
@@ -133,6 +147,110 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                 title.setForeground(FONT_COLOR);
                 
                 JLabel desc = new JLabel("Configure the list of recognised anti-CSRF tokens and other scanner settings.");
+                
+                JLabel csrfSettingsLabel = new JLabel("Scanner Settings");
+                csrfSettingsLabel.setFont(new Font(csrfSettingsLabel.getFont().getName(), Font.PLAIN, 11));
+                csrfSettingsLabel.setForeground(FONT_COLOR);
+                
+                JLabel methodDesc = new JLabel("<html>Select the HTTP request methods to scan.</html>");
+                methodDesc.setPreferredSize(new Dimension(panel.getWidth(), 100));
+                
+                methods = new DefaultListModel<String>();
+                
+                getMethod = new JCheckBox("GET");
+                getMethod.addItemListener(new ItemListener()
+                {
+                    @Override public void itemStateChanged(ItemEvent e)
+                    {
+                        if (getMethod.isSelected())
+                        {
+                            if (!methods.contains("GET"))
+                            {
+                                methods.addElement("GET");
+                            }
+                        }
+                        else
+                        {
+                            methods.removeElement("GET");
+                        }
+                    }
+                });
+                
+                postMethod = new JCheckBox("POST");
+                postMethod.addItemListener(new ItemListener()
+                {
+                    @Override public void itemStateChanged(ItemEvent e)
+                    {
+                        if (postMethod.isSelected())
+                        {
+                            if (!methods.contains("POST"))
+                            {
+                                methods.addElement("POST");
+                            }
+                        }
+                        else
+                        {
+                            methods.removeElement("POST");
+                        }
+                    }
+                });
+                
+                putMethod = new JCheckBox("PUT");
+                putMethod.addItemListener(new ItemListener()
+                {
+                    @Override public void itemStateChanged(ItemEvent e)
+                    {
+                        if (putMethod.isSelected())
+                        {
+                            if (!methods.contains("PUT"))
+                            {
+                                methods.addElement("PUT");
+                            }
+                        }
+                        else
+                        {
+                            methods.removeElement("PUT");
+                        }
+                    }
+                });
+                
+                deleteMethod = new JCheckBox("DELETE");
+                deleteMethod.addItemListener(new ItemListener()
+                {
+                    @Override public void itemStateChanged(ItemEvent e)
+                    {
+                        if (deleteMethod.isSelected())
+                        {
+                            if (!methods.contains("DELETE"))
+                            {
+                                methods.addElement("DELETE");
+                            }
+                        }
+                        else
+                        {
+                            methods.removeElement("DELETE");
+                        }
+                    }
+                });
+                
+                patchMethod = new JCheckBox("PATCH");
+                patchMethod.addItemListener(new ItemListener()
+                {
+                    @Override public void itemStateChanged(ItemEvent e)
+                    {
+                        if (patchMethod.isSelected())
+                        {
+                            if (!methods.contains("PATCH"))
+                            {
+                                methods.addElement("PATCH");
+                            }
+                        }
+                        else
+                        {
+                            methods.removeElement("PATCH");
+                        }
+                    }
+                });
                 
                 JLabel csrfListLabel = new JLabel("Anti-CSRF Tokens");
                 csrfListLabel.setFont(new Font(csrfListLabel.getFont().getName(), Font.PLAIN, 11));
@@ -304,6 +422,15 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                         .addGroup(layout.createParallelGroup()
                         .addComponent(title)
                         .addComponent(desc)
+                        .addComponent(csrfSettingsLabel)
+                        .addComponent(methodDesc)
+                        .addGroup(layout.createSequentialGroup()
+                        .addComponent(getMethod)
+                        .addComponent(postMethod)
+                        .addComponent(putMethod)
+                        .addComponent(deleteMethod)
+                        .addComponent(patchMethod))
+                                
                         .addComponent(csrfListLabel)
                         .addGroup(layout.createSequentialGroup()
                         .addComponent(scrollPane)
@@ -341,6 +468,17 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                         .addComponent(title)
                         .addComponent(desc)
                         .addGap(15)
+                                
+                        .addComponent(csrfSettingsLabel)
+                        .addComponent(methodDesc)
+                        .addGroup(layout.createParallelGroup()
+                        .addComponent(getMethod)
+                        .addComponent(postMethod)
+                        .addComponent(putMethod)
+                        .addComponent(deleteMethod)
+                        .addComponent(patchMethod))
+                        .addGap(15)
+                                
                         .addComponent(csrfListLabel)
                         .addGroup(layout.createParallelGroup()
                         .addComponent(scrollPane)
@@ -391,6 +529,12 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
     {
         this.callbacks.saveExtensionSetting("save", "1");
         
+        this.callbacks.saveExtensionSetting("getMethod", Boolean.toString(getMethod.isSelected()));
+        this.callbacks.saveExtensionSetting("postMethod", Boolean.toString(postMethod.isSelected()));
+        this.callbacks.saveExtensionSetting("putMethod", Boolean.toString(putMethod.isSelected()));
+        this.callbacks.saveExtensionSetting("deleteMethod", Boolean.toString(deleteMethod.isSelected()));
+        this.callbacks.saveExtensionSetting("patchMethod", Boolean.toString(patchMethod.isSelected()));
+        
         this.callbacks.saveExtensionSetting("tokens", objectToString(tokens));
         
         this.callbacks.saveExtensionSetting("caseSensitive", Boolean.toString(caseSensitive.isSelected()));
@@ -413,6 +557,93 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
         }
         else
         {
+            methods.removeAllElements();
+            
+            if (this.callbacks.loadExtensionSetting("getMethod") != null)
+            {
+                getMethod.setSelected(Boolean.parseBoolean(this.callbacks.loadExtensionSetting("getMethod")));
+            }
+            else
+            {
+                getMethod.setSelected(DEFAULT_GET_METHOD);
+            }
+            
+            if (getMethod.isSelected())
+            {
+                if (!methods.contains("GET"))
+                {
+                    methods.addElement("GET");
+                }
+            }
+            
+            if (this.callbacks.loadExtensionSetting("postMethod") != null)
+            {
+                postMethod.setSelected(Boolean.parseBoolean(this.callbacks.loadExtensionSetting("postMethod")));
+            }
+            else
+            {
+                postMethod.setSelected(DEFAULT_POST_METHOD);
+            }
+            
+            if (postMethod.isSelected())
+            {
+                if (!methods.contains("POST"))
+                {
+                    methods.addElement("POST");
+                }
+            }
+            
+            if (this.callbacks.loadExtensionSetting("putMethod") != null)
+            {
+                putMethod.setSelected(Boolean.parseBoolean(this.callbacks.loadExtensionSetting("putMethod")));
+            }
+            else
+            {
+                putMethod.setSelected(DEFAULT_PUT_METHOD);
+            }
+            
+            if (putMethod.isSelected())
+            {
+                if (!methods.contains("PUT"))
+                {
+                    methods.addElement("PUT");
+                }
+            }
+            
+            if (this.callbacks.loadExtensionSetting("deleteMethod") != null)
+            {
+                deleteMethod.setSelected(Boolean.parseBoolean(this.callbacks.loadExtensionSetting("deleteMethod")));
+            }
+            else
+            {
+                deleteMethod.setSelected(DEFAULT_DELETE_METHOD);
+            }
+            
+            if (deleteMethod.isSelected())
+            {
+                if (!methods.contains("DELETE"))
+                {
+                    methods.addElement("DELETE");
+                }
+            }
+            
+            if (this.callbacks.loadExtensionSetting("patchMethod") != null)
+            {
+                patchMethod.setSelected(Boolean.parseBoolean(this.callbacks.loadExtensionSetting("patchMethod")));
+            }
+            else
+            {
+                patchMethod.setSelected(DEFAULT_PATCH_METHOD);
+            }
+            
+            if (patchMethod.isSelected())
+            {
+                if (!methods.contains("PATCH"))
+                {
+                    methods.addElement("PATCH");
+                }
+            }
+            
             if (this.callbacks.loadExtensionSetting("tokens") != null)
             {
                 try
@@ -508,6 +739,18 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
     {
         this.callbacks.saveExtensionSetting("save", "2");
         
+        methods.removeAllElements();
+        for (String s : DEFAULT_METHOD_LIST)
+        {
+            methods.addElement(s);
+        }
+        
+        getMethod.setSelected(DEFAULT_GET_METHOD);
+        postMethod.setSelected(DEFAULT_POST_METHOD);
+        putMethod.setSelected(DEFAULT_PUT_METHOD);
+        deleteMethod.setSelected(DEFAULT_DELETE_METHOD);
+        patchMethod.setSelected(DEFAULT_PATCH_METHOD);
+        
         tokens = new DefaultListModel<String>();
         for (String s : DEFAULT_TOKEN_LIST)
         {
@@ -594,83 +837,86 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
             boolean token = false;
             String tokenValue = "";
             
-            List<IParameter> params = helpers.analyzeRequest(baseRequestResponse).getParameters();
-            if (!params.isEmpty())
+            if (methods.contains(helpers.analyzeRequest(baseRequestResponse).getMethod()))
             {
-                boolean isUsableParam = false;
-                for (IParameter param : params)
+                List<IParameter> params = helpers.analyzeRequest(baseRequestResponse).getParameters();
+                if (!params.isEmpty())
                 {
-                    if (param.getType() == IParameter.PARAM_BODY || param.getType() == IParameter.PARAM_URL)
-                    {
-                        isUsableParam = true;
-                        break;
-                    }
-                }
-                
-                if (isUsableParam)
-                {
+                    boolean isUsableParam = false;
                     for (IParameter param : params)
                     {
                         if (param.getType() == IParameter.PARAM_BODY || param.getType() == IParameter.PARAM_URL)
                         {
-                            for (int i = 0; i < tokens.getSize(); i++)
-                            {
-                                if (caseSensitive.isSelected())
-                                {
-                                    if (tokens.get(i).equals(param.getName()))
-                                    {
-                                        token = true;
-                                        tokenValue = param.getValue();
-                                        start = param.getNameStart();
-                                        end = param.getValueEnd();
-                                        break;
-                                    }
-                                }
-                                else
-                                {
-                                    if (tokens.get(i).equalsIgnoreCase(param.getName()))
-                                    {
-                                        token = true;
-                                        tokenValue = param.getValue();
-                                        start = param.getNameStart();
-                                        end = param.getValueEnd();
-                                        break;
-                                    }
-                                }
-                            }
+                            isUsableParam = true;
+                            break;
                         }
                     }
 
-                    if (!token)
+                    if (isUsableParam)
                     {
-                        if (noTokenRequests.isSelected())
+                        for (IParameter param : params)
                         {
-                            String query = helpers.analyzeRequest(baseRequestResponse).getUrl().getQuery();
-                            if (query != null)
+                            if (param.getType() == IParameter.PARAM_BODY || param.getType() == IParameter.PARAM_URL)
                             {
-                                int queryStart = new String(baseRequestResponse.getRequest()).indexOf(query);
-                                noTokenRequestQueryHighlights.add(new int[] {queryStart, queryStart + query.length()});
-                            }
-                            noTokenRequestHighlights.add(new int[] {requestOffset, requestOffset + requestBody.length()});
-                        }
-                    }
-                    else
-                    {
-                        if (foundTokenRequests.isSelected())
-                        {
-                            foundTokenRequestHighlights.add(new int[] {start, end});
-                        }
-
-                        if (tokenLengthCheck.isSelected())
-                        {    
-                            try
-                            {
-                                if (URLDecoder.decode(tokenValue, "UTF-8").length() < minTokenLength)
+                                for (int i = 0; i < tokens.getSize(); i++)
                                 {
-                                    minRequestTokenLengthHighlights.add(new int[] {start, end});
+                                    if (caseSensitive.isSelected())
+                                    {
+                                        if (tokens.get(i).equals(param.getName()))
+                                        {
+                                            token = true;
+                                            tokenValue = param.getValue();
+                                            start = param.getNameStart();
+                                            end = param.getValueEnd();
+                                            break;
+                                        }
+                                    }
+                                    else
+                                    {
+                                        if (tokens.get(i).equalsIgnoreCase(param.getName()))
+                                        {
+                                            token = true;
+                                            tokenValue = param.getValue();
+                                            start = param.getNameStart();
+                                            end = param.getValueEnd();
+                                            break;
+                                        }
+                                    }
                                 }
                             }
-                            catch (UnsupportedEncodingException e){}
+                        }
+
+                        if (!token)
+                        {
+                            if (noTokenRequests.isSelected())
+                            {
+                                String query = helpers.analyzeRequest(baseRequestResponse).getUrl().getQuery();
+                                if (query != null)
+                                {
+                                    int queryStart = new String(baseRequestResponse.getRequest()).indexOf(query);
+                                    noTokenRequestQueryHighlights.add(new int[] {queryStart, queryStart + query.length()});
+                                }
+                                noTokenRequestHighlights.add(new int[] {requestOffset, requestOffset + requestBody.length()});
+                            }
+                        }
+                        else
+                        {
+                            if (foundTokenRequests.isSelected())
+                            {
+                                foundTokenRequestHighlights.add(new int[] {start, end});
+                            }
+
+                            if (tokenLengthCheck.isSelected())
+                            {    
+                                try
+                                {
+                                    if (URLDecoder.decode(tokenValue, "UTF-8").length() < minTokenLength)
+                                    {
+                                        minRequestTokenLengthHighlights.add(new int[] {start, end});
+                                    }
+                                }
+                                catch (UnsupportedEncodingException e){}
+                            }
                         }
                     }
                 }
@@ -904,7 +1150,7 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                     detail
                 ));
             }
-
+            
             if (!issues.isEmpty())
             {
                 return issues;
@@ -926,7 +1172,6 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
         
         if (newIssue.getIssueName().equals(existingIssue.getIssueName()))
         {
-            
             if (helpers.analyzeRequest(newIssue.getHttpMessages()[0]).getUrl().getPath().equals(helpers.analyzeRequest(existingIssue.getHttpMessages()[0]).getUrl().getPath()))
             {
                 List<IParameter> originalNewParams = helpers.analyzeRequest(newIssue.getHttpMessages()[0]).getParameters();
@@ -1063,10 +1308,10 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
     
     class CSRFScanIssue implements IScanIssue
     {
-        private String name, severity, confidence, detail;
-        private IHttpService httpService;
-        private URL url;
-        private IHttpRequestResponse[] httpMessages;
+        private final String name, severity, confidence, detail;
+        private final IHttpService httpService;
+        private final URL url;
+        private final IHttpRequestResponse[] httpMessages;
         
         public CSRFScanIssue(String name, IHttpService httpService, URL url, IHttpRequestResponse[] httpMessages, String severity, String confidence, String detail)
         {
