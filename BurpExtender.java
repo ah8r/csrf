@@ -28,7 +28,6 @@ import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.UnsupportedEncodingException;
@@ -36,34 +35,42 @@ import java.net.URL;
 import java.net.URLDecoder;
 import java.text.NumberFormat;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 import javax.swing.BorderFactory;
+import javax.swing.ButtonGroup;
 import javax.swing.DefaultListModel;
 import javax.swing.GroupLayout;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
+import javax.swing.JDialog;
 import javax.swing.JFormattedTextField;
+import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JRadioButton;
 import javax.swing.JScrollPane;
+import javax.swing.JTable;
+import javax.swing.JTextField;
+import javax.swing.LayoutStyle;
 import javax.swing.SwingUtilities;
 import javax.swing.text.NumberFormatter;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
-import sun.misc.BASE64Decoder;
-import sun.misc.BASE64Encoder;
 
 public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
 {
     private IBurpExtenderCallbacks callbacks;
     private IExtensionHelpers helpers;
+    private JFrame parent;
     private JPanel panel;
     private JScrollPane scroll;
     
@@ -74,8 +81,6 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
     private final Matcher FORM_CLOSE_MATCHER = FORM_CLOSE_PATTERN.matcher("");
     
     private final Color FONT_COLOR = new Color(0xE58925);
-    private final BASE64Encoder base64Encoder = new BASE64Encoder();
-    private final BASE64Decoder base64Decoder = new BASE64Decoder();
     
     // Issue Types
     private final String NO_TOKEN_IN_REQUEST_PARAMS = "Request vulnerable to Cross-site Request Forgery";
@@ -85,14 +90,13 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
     private final String TOKEN_IN_RESPONSE_FORM = "Anti-CSRF token detected in form";
     
     // Defaults
-    private final String[] DEFAULT_METHOD_LIST = {"GET", "POST", "PUT", "DELETE", "PATCH"};
-    private final boolean DEFAULT_GET_METHOD = true;
+    private final String[] DEFAULT_METHOD_LIST = {"POST", "PUT", "DELETE", "PATCH"};
+    private final boolean DEFAULT_GET_METHOD = false;
     private final boolean DEFAULT_POST_METHOD = true;
     private final boolean DEFAULT_PUT_METHOD = true;
     private final boolean DEFAULT_DELETE_METHOD = true;
     private final boolean DEFAULT_PATCH_METHOD = true;
-    private final String[] DEFAULT_TOKEN_LIST = {"Token", "CSRF", "CSRFtoken", "antiCSRF", "__RequestVerificationToken", "RequestVerificationToken", "antiForgery", "Forgery"};
-    private final boolean DEFAULT_CASE_INSENSITIVITY = false;
+    private ArrayList<Token> DEFAULT_TOKENS = new ArrayList<Token>();
     private final boolean DEFAULT_MIN_TOKEN = true;
     private final int DEFAULT_MIN_TOKEN_LENGTH = 16;
     private final boolean DEFAULT_NO_TOKEN_REQUESTS = true;
@@ -107,9 +111,8 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
     private JCheckBox putMethod;
     private JCheckBox deleteMethod;
     private JCheckBox patchMethod;
-    private DefaultListModel<String> tokens;
-    private JList tokenList;
-    private JCheckBox caseSensitive;
+    private JTable tokenTable;
+    private TokenTableModel tokenTableModel;
     private JCheckBox tokenLengthCheck;
     private JFormattedTextField tokenLength;
     private int minTokenLength;
@@ -138,9 +141,25 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
             @Override
             public void run()
             {
+                DEFAULT_TOKENS.add(new LiteralToken("token", false));
+                DEFAULT_TOKENS.add(new LiteralToken("csrf", false));
+                DEFAULT_TOKENS.add(new RegexToken("csrf(-|_)?token", false));
+                DEFAULT_TOKENS.add(new RegexToken("anti(csrf|forgery)(token)?", false));
+                DEFAULT_TOKENS.add(new RegexToken("(__)?RequestVerificationToken", false));
+                DEFAULT_TOKENS.add(new LiteralToken("ViewStateUserKey", true));
+                DEFAULT_TOKENS.add(new LiteralToken("forgery", false));
+                DEFAULT_TOKENS.add(new LiteralToken("nonce", false));
+                DEFAULT_TOKENS.add(new LiteralToken("csrfmiddlewaretoken", false));
+                DEFAULT_TOKENS.add(new LiteralToken("_wpnonce", false));
+                DEFAULT_TOKENS.add(new LiteralToken("_token", false));
+                DEFAULT_TOKENS.add(new LiteralToken("_csrfToken", false));
+                DEFAULT_TOKENS.add(new LiteralToken("_csrf", false));
+                
                 panel = new JPanel();
                 scroll = new JScrollPane(panel, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED, JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
                 scroll.setBorder(BorderFactory.createEmptyBorder());
+                
+                parent = (JFrame) SwingUtilities.getRoot(scroll);
                 
                 JLabel title = new JLabel("Cross-site Request Forgery (CSRF) Scanner");
                 title.setFont(new Font(title.getFont().getName(), Font.BOLD, 13));
@@ -256,34 +275,104 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                 csrfListLabel.setFont(new Font(csrfListLabel.getFont().getName(), Font.PLAIN, 11));
                 csrfListLabel.setForeground(FONT_COLOR);
                 
-                tokens = new DefaultListModel<String>();
-                
-                tokenList = new JList(tokens);
-                JScrollPane scrollPane = new JScrollPane(tokenList);
-                scrollPane.setMaximumSize(new Dimension(200, 200));
-                scrollPane.setMinimumSize(new Dimension(200, 200));
-                
                 JButton addToken = new JButton("Add");
                 addToken.addActionListener(new ActionListener()
                 {
                     @Override public void actionPerformed(ActionEvent e)
                     {
-                        String s = (String)JOptionPane.showInputDialog(
-                        panel,
-                        "Enter an Anti-CSRF Token:",
-                        "Add Anti-CSRF Token",
-                        JOptionPane.PLAIN_MESSAGE,
-                        null,
-                        null,
-                        "");
-                        
-                        if (s.trim().length() > 0)
+                        JDialog addToken = new JDialog(parent, "Add Token", true);
+                        JPanel addTokenPanel = new JPanel();
+
+                        JLabel valueLabel = new JLabel("Value:");
+                        JTextField value = new JTextField();
+                        value.setMaximumSize(new Dimension(Integer.MAX_VALUE, value.getPreferredSize().height));
+                        value.setMinimumSize(new Dimension(300, value.getPreferredSize().height));
+
+                        JLabel matchTypeLabel = new JLabel("Match Type:");
+                        ButtonGroup matchType = new ButtonGroup();
+                        JRadioButton literal = new JRadioButton("Literal");
+                        literal.setActionCommand("0");
+                        JRadioButton regex = new JRadioButton("Regex");
+                        regex.setActionCommand("1");
+                        matchType.add(literal);
+                        matchType.add(regex);
+                        literal.setSelected(true);
+
+                        JCheckBox caseSensitive = new JCheckBox("Case Sensitive");
+
+                        JButton ok = new JButton("OK");
+                        ok.addActionListener(new AddTokenActionListener(addToken, tokenTableModel, value, matchType, caseSensitive));
+
+                        JButton cancel = new JButton("Cancel");
+                        cancel.putClientProperty("parent", addToken);
+                        cancel.addActionListener(new ActionListener()
                         {
-                            if (!tokens.contains(s))
+                            @Override public void actionPerformed(ActionEvent e)
                             {
-                                tokens.addElement(s);
+                                ((JDialog) (((JButton) e.getSource()).getClientProperty("parent"))).dispose();
                             }
-                        }
+                        });
+
+                        GroupLayout layout = new GroupLayout(addTokenPanel);
+                        addTokenPanel.setLayout(layout);
+                        layout.setAutoCreateGaps(true);
+                        layout.setAutoCreateContainerGaps(true);
+
+                        layout.setHorizontalGroup(layout.createSequentialGroup()
+                            .addGap(15)
+                            .addGroup(layout.createParallelGroup()
+                                .addGroup(layout.createSequentialGroup()
+                                    .addComponent(valueLabel)
+                                    .addComponent(value)
+                                )
+                                .addGroup(layout.createSequentialGroup()
+                                    .addComponent(matchTypeLabel)
+                                    .addComponent(literal)
+                                    .addComponent(regex)
+                                )
+                                .addGroup(layout.createSequentialGroup()
+                                    .addComponent(caseSensitive)
+                                )
+                                .addGroup(layout.createSequentialGroup()
+                                    .addPreferredGap(LayoutStyle.ComponentPlacement.RELATED, GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                                    .addComponent(ok)
+                                    .addComponent(cancel)
+                                )
+                            )
+                            .addGap(15)
+                        );
+
+                        layout.setVerticalGroup(layout.createSequentialGroup()
+                            .addGap(15)
+                            .addGroup(layout.createParallelGroup()
+                                .addComponent(valueLabel, GroupLayout.Alignment.CENTER)
+                                .addComponent(value, GroupLayout.Alignment.CENTER)
+                            )
+                            .addGap(10)
+                            .addGroup(layout.createParallelGroup()
+                                .addComponent(matchTypeLabel, GroupLayout.Alignment.CENTER)
+                                .addComponent(literal, GroupLayout.Alignment.CENTER)
+                                .addComponent(regex, GroupLayout.Alignment.CENTER)
+                            )
+                            .addGap(10)
+                            .addGroup(layout.createParallelGroup()
+                                .addComponent(caseSensitive)
+                            )
+                            .addGap(10)
+                            .addGroup(layout.createParallelGroup()
+                                .addComponent(ok)
+                                .addComponent(cancel)
+                            )
+                            .addGap(15)
+                        );
+
+                        addToken.getContentPane().add(addTokenPanel);
+                        addToken.pack();
+
+                        addToken.setMinimumSize(new Dimension(addToken.getPreferredSize().width, addToken.getPreferredSize().height));
+
+                        addToken.setLocationRelativeTo(parent);
+                        addToken.setVisible(true);
                     }
                 });
                 
@@ -292,22 +381,115 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                 {
                     @Override public void actionPerformed(ActionEvent e)
                     {
-                        int i = tokenList.getSelectedIndex();
-                        if (i != -1)
+                        int index = tokenTable.getSelectedRow();
+                            
+                        if (index != -1)
                         {
-                            String s = (String)JOptionPane.showInputDialog(
-                            panel,
-                            "Enter an Anti-CSRF Token:",
-                            "Edit Anti-CSRF Token",
-                            JOptionPane.PLAIN_MESSAGE,
-                            null,
-                            null,
-                            tokens.get(i));
+                            Token token = tokenTableModel.getToken(index);
 
-                            if (s.trim().length() > 0)
+                            JDialog editToken = new JDialog(parent, "Edit Token", true);
+                            JPanel editTokenPanel = new JPanel();
+
+                            JLabel valueLabel = new JLabel("Value:");
+                            JTextField value = new JTextField();
+                            value.setText(token.getValue());
+                            value.setMaximumSize(new Dimension(Integer.MAX_VALUE, value.getPreferredSize().height));
+                            value.setMinimumSize(new Dimension(300, value.getPreferredSize().height));
+
+                            JLabel matchTypeLabel = new JLabel("Match Type:");
+                            ButtonGroup matchType = new ButtonGroup();
+                            JRadioButton literal = new JRadioButton("Literal");
+                            literal.setActionCommand("0");
+                            JRadioButton regex = new JRadioButton("Regex");
+                            regex.setActionCommand("1");
+                            matchType.add(literal);
+                            matchType.add(regex);
+
+                            if (token.getMatchType() == 1)
                             {
-                                tokens.set(i, s);
+                                regex.setSelected(true);
                             }
+                            else
+                            {
+                                literal.setSelected(true);
+                            }
+
+                            JCheckBox caseSensitive = new JCheckBox("Case Sensitive");
+                            caseSensitive.setSelected(token.getCaseSensitive());
+
+                            JButton ok = new JButton("OK");
+                            ok.addActionListener(new EditTokenActionListener(editToken, tokenTableModel, index, value, matchType, caseSensitive));
+
+                            JButton cancel = new JButton("Cancel");
+                            cancel.putClientProperty("parent", editToken);
+                            cancel.addActionListener(new ActionListener()
+                            {
+                                @Override public void actionPerformed(ActionEvent e)
+                                {
+                                    ((JDialog) (((JButton) e.getSource()).getClientProperty("parent"))).dispose();
+                                }
+                            });
+
+                            GroupLayout layout = new GroupLayout(editTokenPanel);
+                            editTokenPanel.setLayout(layout);
+                            layout.setAutoCreateGaps(true);
+                            layout.setAutoCreateContainerGaps(true);
+
+                            layout.setHorizontalGroup(layout.createSequentialGroup()
+                                .addGap(15)
+                                .addGroup(layout.createParallelGroup()
+                                    .addGroup(layout.createSequentialGroup()
+                                        .addComponent(valueLabel)
+                                        .addComponent(value)
+                                    )
+                                    .addGroup(layout.createSequentialGroup()
+                                        .addComponent(matchTypeLabel)
+                                        .addComponent(literal)
+                                        .addComponent(regex)
+                                    )
+                                    .addGroup(layout.createSequentialGroup()
+                                        .addComponent(caseSensitive)
+                                    )
+                                    .addGroup(layout.createSequentialGroup()
+                                        .addPreferredGap(LayoutStyle.ComponentPlacement.RELATED, GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                                        .addComponent(ok)
+                                        .addComponent(cancel)
+                                    )
+                                )
+                                .addGap(15)
+                            );
+
+                            layout.setVerticalGroup(layout.createSequentialGroup()
+                                .addGap(15)
+                                .addGroup(layout.createParallelGroup()
+                                    .addComponent(valueLabel, GroupLayout.Alignment.CENTER)
+                                    .addComponent(value, GroupLayout.Alignment.CENTER)
+                                )
+                                .addGap(10)
+                                .addGroup(layout.createParallelGroup()
+                                    .addComponent(matchTypeLabel, GroupLayout.Alignment.CENTER)
+                                    .addComponent(literal, GroupLayout.Alignment.CENTER)
+                                    .addComponent(regex, GroupLayout.Alignment.CENTER)
+                                )
+                                .addGap(10)
+                                .addGroup(layout.createParallelGroup()
+                                    .addComponent(caseSensitive)
+                                )
+                                .addGap(10)
+                                .addGroup(layout.createParallelGroup()
+                                    .addComponent(ok)
+                                    .addComponent(cancel)
+                                )
+                                .addGap(15)
+                            );
+
+                            editToken.getContentPane().add(editTokenPanel);
+                            editToken.pack();
+
+                            editToken.setMinimumSize(new Dimension(editToken.getPreferredSize().width, editToken.getPreferredSize().height));
+
+                            editToken.setLocationRelativeTo(parent);
+                            editToken.setVisible(true);
                         }
                     }
                 });
@@ -317,19 +499,32 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                 {
                     @Override public void actionPerformed(ActionEvent e)
                     {
-                        // Do it backwards so the indexes don't change!
-                        int[] selectedIndices = tokenList.getSelectedIndices();
-                        for (int i = selectedIndices.length -1; i >=0; i--)
+                        int[] rows = tokenTable.getSelectedRows();
+                        Arrays.sort(rows);
+                        
+                        for (int i = rows.length - 1; i >= 0; i--)
                         {
-                            tokens.remove(selectedIndices[i]);
+                            int index = rows[i];
+                            
+                            tokenTableModel.remove(index);
                         }
+                        tokenTableModel.getArray().trimToSize();
+                        
+                        tokenTableModel.fireTableDataChanged();
                     }
                 });
                 
                 addToken.setMinimumSize(removeToken.getMinimumSize());
                 editToken.setMinimumSize(removeToken.getMinimumSize());
                 
-                caseSensitive = new JCheckBox("Case-sensitive token matching.");
+                tokenTableModel = new TokenTableModel();
+                tokenTable = new JTable(tokenTableModel);
+                
+                tokenTable.setAutoResizeMode(JTable.AUTO_RESIZE_ALL_COLUMNS);
+                
+                JScrollPane tokenTableScrollPane = new JScrollPane(tokenTable);
+                tokenTableScrollPane.setMaximumSize(new Dimension(900, 200));
+                tokenTableScrollPane.setMinimumSize(new Dimension(900, 200));
                 
                 JLabel tokenAttributeLabel = new JLabel("Token Attribute Checks");
                 tokenAttributeLabel.setFont(csrfListLabel.getFont());
@@ -344,7 +539,7 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                 formatter.setCommitsOnValidEdit(true);
                 formatter.setAllowsInvalid(false);
                 tokenLength = new JFormattedTextField(formatter);
-                tokenLength.setValue(new Integer(0));
+                tokenLength.setValue(0);
                 tokenLength.setColumns(4);
                 tokenLength.addPropertyChangeListener("value", new PropertyChangeListener()
                 {
@@ -416,8 +611,7 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                 layout.setAutoCreateGaps(true);
                 layout.setAutoCreateContainerGaps(true);
                 
-                layout.setHorizontalGroup(
-                        layout.createSequentialGroup()
+                layout.setHorizontalGroup(layout.createSequentialGroup()
                         .addGap(15)
                         .addGroup(layout.createParallelGroup()
                         .addComponent(title)
@@ -433,12 +627,14 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                                 
                         .addComponent(csrfListLabel)
                         .addGroup(layout.createSequentialGroup()
-                        .addComponent(scrollPane)
-                        .addGroup(layout.createParallelGroup()
-                        .addComponent(addToken)
-                        .addComponent(editToken)
-                        .addComponent(removeToken)))
-                        .addComponent(caseSensitive)
+                            .addGroup(
+                                layout.createParallelGroup()
+                                .addComponent(addToken)
+                                .addComponent(editToken)
+                                .addComponent(removeToken)
+                            )
+                            .addComponent(tokenTableScrollPane)
+                        )
                         
                         .addComponent(missingTokenLabel)
                         .addComponent(noTokenDesc)
@@ -462,8 +658,7 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                         .addComponent(restoreSettings)
                         .addComponent(restoreDefaults))));
                 
-                layout.setVerticalGroup(
-                        layout.createSequentialGroup()
+                layout.setVerticalGroup(layout.createSequentialGroup()
                         .addGap(15)
                         .addComponent(title)
                         .addComponent(desc)
@@ -481,12 +676,13 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                                 
                         .addComponent(csrfListLabel)
                         .addGroup(layout.createParallelGroup()
-                        .addComponent(scrollPane)
+                        .addComponent(tokenTableScrollPane)
                         .addGroup(layout.createSequentialGroup()
-                        .addComponent(addToken)
-                        .addComponent(editToken)
-                        .addComponent(removeToken))) 
-                        .addComponent(caseSensitive)
+                            .addComponent(addToken)
+                            .addComponent(editToken)
+                            .addComponent(removeToken)
+                        )
+                    )
                         .addGap(15)
                         
                         .addComponent(missingTokenLabel)
@@ -535,9 +731,7 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
         this.callbacks.saveExtensionSetting("deleteMethod", Boolean.toString(deleteMethod.isSelected()));
         this.callbacks.saveExtensionSetting("patchMethod", Boolean.toString(patchMethod.isSelected()));
         
-        this.callbacks.saveExtensionSetting("tokens", objectToString(tokens));
-        
-        this.callbacks.saveExtensionSetting("caseSensitive", Boolean.toString(caseSensitive.isSelected()));
+        this.callbacks.saveExtensionSetting("tokens", objectToString(tokenTableModel.getArray()));
         
         this.callbacks.saveExtensionSetting("tokenLengthCheck", Boolean.toString(tokenLengthCheck.isSelected()));
         this.callbacks.saveExtensionSetting("minTokenLength", Integer.toString(minTokenLength));
@@ -648,35 +842,39 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
             {
                 try
                 {
-                    tokens = (DefaultListModel<String>)stringToObject(this.callbacks.loadExtensionSetting("tokens"));
-                }
-                catch (ClassCastException e)
-                {
-                    tokens = new DefaultListModel<String>();
-                    for (String s : DEFAULT_TOKEN_LIST)
+                    ArrayList<Token> tokens = new ArrayList<Token>();
+                    
+                    Object obj = stringToObject(this.callbacks.loadExtensionSetting("tokens"));
+                    
+                    if (obj instanceof DefaultListModel) // Convert from old list model to new table model.
                     {
-                        tokens.addElement(s);
+                        DefaultListModel<String> oldTokens = (DefaultListModel<String>) obj;
+                        
+                        for (int i = 0; i < oldTokens.getSize(); i++)
+                        {
+                            tokens.add(new LiteralToken(oldTokens.elementAt(i), false));
+                        }
                     }
+                    else
+                    {
+                        tokens = (ArrayList<Token>) stringToObject(this.callbacks.loadExtensionSetting("tokens"));
+                    }
+                    
+                    tokenTableModel.setArray(tokens);
                 }
-            }
-            else
-            {
-                tokens = new DefaultListModel<String>();
-                for (String s : DEFAULT_TOKEN_LIST)
+                catch (Exception e)
                 {
-                    tokens.addElement(s);
+                    System.out.println(e.getMessage());
+                    tokenTableModel.getArray().clear();
+                    tokenTableModel.setArray(DEFAULT_TOKENS);
                 }
-            }
-            tokenList.setModel(tokens);
-            
-            if (this.callbacks.loadExtensionSetting("caseSensitive") != null)
-            {
-                caseSensitive.setSelected(Boolean.parseBoolean(this.callbacks.loadExtensionSetting("caseSensitive")));
             }
             else
             {
-                caseSensitive.setSelected(DEFAULT_CASE_INSENSITIVITY);
+                tokenTableModel.getArray().clear();
+                tokenTableModel.setArray(DEFAULT_TOKENS);
             }
+            tokenTableModel.fireTableDataChanged();
             
             if (this.callbacks.loadExtensionSetting("tokenLengthCheck") != null)
             {
@@ -751,14 +949,9 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
         deleteMethod.setSelected(DEFAULT_DELETE_METHOD);
         patchMethod.setSelected(DEFAULT_PATCH_METHOD);
         
-        tokens = new DefaultListModel<String>();
-        for (String s : DEFAULT_TOKEN_LIST)
-        {
-            tokens.addElement(s);
-        }
-        tokenList.setModel(tokens);
-        
-        caseSensitive.setSelected(DEFAULT_CASE_INSENSITIVITY);
+        tokenTableModel.getArray().clear();
+        tokenTableModel.setArray(DEFAULT_TOKENS);
+        tokenTableModel.fireTableDataChanged();
         
         tokenLengthCheck.setSelected(DEFAULT_MIN_TOKEN);
         tokenLength.setValue(DEFAULT_MIN_TOKEN_LENGTH);
@@ -777,11 +970,14 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
         {
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             ObjectOutputStream out = new ObjectOutputStream(baos);
-            out.writeObject(tokens);
+            out.writeObject(o);
             out.close();
-            return base64Encoder.encode(baos.toByteArray());
+            return this.helpers.base64Encode(baos.toByteArray());
         }
-        catch (IOException e){}
+        catch (Exception e)
+        {
+            System.err.println(e.toString());
+        }
         
         return "";
     }
@@ -790,14 +986,16 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
     {
         try
         {
-            byte [] data = base64Decoder.decodeBuffer(s);
+            byte [] data = this.helpers.base64Decode(s);
             ObjectInputStream ois = new ObjectInputStream(new ByteArrayInputStream(data));
-            Object o  = ois.readObject();
+            Object o = ois.readObject();
             ois.close();
             return o;
         }
-        catch (ClassNotFoundException e){}
-        catch (IOException e){}
+        catch (Exception e)
+        {
+            System.err.println(e.toString());
+        }
         
         return new Object();
     }
@@ -842,81 +1040,59 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                 List<IParameter> params = helpers.analyzeRequest(baseRequestResponse).getParameters();
                 if (!params.isEmpty())
                 {
-                    boolean isUsableParam = false;
                     for (IParameter param : params)
                     {
-                        if (param.getType() == IParameter.PARAM_BODY || param.getType() == IParameter.PARAM_URL)
+                        if (param.getType() == IParameter.PARAM_BODY
+                                || param.getType() == IParameter.PARAM_URL
+                                || param.getType() == IParameter.PARAM_JSON
+                                || param.getType() == IParameter.PARAM_MULTIPART_ATTR
+                                || param.getType() == IParameter.PARAM_XML
+                                || param.getType() == IParameter.PARAM_XML_ATTR) 
                         {
-                            isUsableParam = true;
-                            break;
+                            for (int i = 0; i < tokenTableModel.getRowCount(); i++)
+                            {
+                                if (tokenTableModel.getToken(i).matches(param.getName()))
+                                {
+                                    token = true;
+                                    tokenValue = param.getValue();
+                                    start = param.getNameStart();
+                                    end = param.getValueEnd();
+                                    break;
+                                }
+                            }
                         }
                     }
 
-                    if (isUsableParam)
+                    if (!token)
                     {
-                        for (IParameter param : params)
+                        if (noTokenRequests.isSelected())
                         {
-                            if (param.getType() == IParameter.PARAM_BODY || param.getType() == IParameter.PARAM_URL)
+                            String query = helpers.analyzeRequest(baseRequestResponse).getUrl().getQuery();
+                            if (query != null)
                             {
-                                for (int i = 0; i < tokens.getSize(); i++)
-                                {
-                                    if (caseSensitive.isSelected())
-                                    {
-                                        if (tokens.get(i).equals(param.getName()))
-                                        {
-                                            token = true;
-                                            tokenValue = param.getValue();
-                                            start = param.getNameStart();
-                                            end = param.getValueEnd();
-                                            break;
-                                        }
-                                    }
-                                    else
-                                    {
-                                        if (tokens.get(i).equalsIgnoreCase(param.getName()))
-                                        {
-                                            token = true;
-                                            tokenValue = param.getValue();
-                                            start = param.getNameStart();
-                                            end = param.getValueEnd();
-                                            break;
-                                        }
-                                    }
-                                }
+                                int queryStart = new String(baseRequestResponse.getRequest()).indexOf(query);
+                                noTokenRequestQueryHighlights.add(new int[] {queryStart, queryStart + query.length()});
                             }
+                            noTokenRequestHighlights.add(new int[] {requestOffset, requestOffset + requestBody.length()});
+                        }
+                    }
+                    else
+                    {
+                        if (foundTokenRequests.isSelected())
+                        {
+                            foundTokenRequestHighlights.add(new int[] {start, end});
                         }
 
-                        if (!token)
-                        {
-                            if (noTokenRequests.isSelected())
+                        if (tokenLengthCheck.isSelected())
+                        {    
+                            try
                             {
-                                String query = helpers.analyzeRequest(baseRequestResponse).getUrl().getQuery();
-                                if (query != null)
+                                if (URLDecoder.decode(tokenValue, "UTF-8").length() < minTokenLength)
                                 {
-                                    int queryStart = new String(baseRequestResponse.getRequest()).indexOf(query);
-                                    noTokenRequestQueryHighlights.add(new int[] {queryStart, queryStart + query.length()});
+                                    minRequestTokenLengthHighlights.add(new int[] {start, end});
                                 }
-                                noTokenRequestHighlights.add(new int[] {requestOffset, requestOffset + requestBody.length()});
                             }
-                        }
-                        else
-                        {
-                            if (foundTokenRequests.isSelected())
-                            {
-                                foundTokenRequestHighlights.add(new int[] {start, end});
-                            }
-
-                            if (tokenLengthCheck.isSelected())
-                            {    
-                                try
-                                {
-                                    if (URLDecoder.decode(tokenValue, "UTF-8").length() < minTokenLength)
-                                    {
-                                        minRequestTokenLengthHighlights.add(new int[] {start, end});
-                                    }
-                                }
-                                catch (UnsupportedEncodingException e){}
-                            }
+                            catch (UnsupportedEncodingException e){}
                         }
                     }
                 }
@@ -948,25 +1124,13 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                     {
                         if (input.hasAttr("name"))
                         {
-                            for (int i = 0; i < tokens.getSize(); i++)
+                            for (int i = 0; i < tokenTableModel.getRowCount(); i++)
                             {
-                                if (caseSensitive.isSelected())
+                                if (tokenTableModel.getToken(i).matches(input.attr("name")))
                                 {
-                                    if (tokens.get(i).equals(input.attr("name")))
-                                    {
-                                        token = true;
-                                        tokenValue = input.val();
-                                        break;
-                                    }
-                                }
-                                else
-                                {
-                                    if (tokens.get(i).equalsIgnoreCase(input.attr("name")))
-                                    {
-                                        token = true;
-                                        tokenValue = input.val();
-                                        break;
-                                    }
+                                    token = true;
+                                    tokenValue = input.val();
+                                    break;
                                 }
                             }
                             
@@ -1187,23 +1351,12 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                         {
                             boolean token = false;
                             
-                            for (int i = 0; i < tokens.getSize(); i++)
+                            for (int i = 0; i < tokenTableModel.getRowCount(); i++)
                             {
-                                if (caseSensitive.isSelected())
+                                if (tokenTableModel.getToken(i).matches(param.getName()))
                                 {
-                                    if (tokens.get(i).equals(param.getName()))
-                                    {
-                                        token = true;
-                                        break;
-                                    }
-                                }
-                                else
-                                {
-                                    if (tokens.get(i).equalsIgnoreCase(param.getName()))
-                                    {
-                                        token = true;
-                                        break;
-                                    }
+                                    token = true;
+                                    break;
                                 }
                             }
                             
@@ -1228,23 +1381,12 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                         {
                             boolean token = false;
                             
-                            for (int i = 0; i < tokens.getSize(); i++)
+                            for (int i = 0; i < tokenTableModel.getRowCount(); i++)
                             {
-                                if (caseSensitive.isSelected())
+                                if (tokenTableModel.getToken(i).matches(param.getName()))
                                 {
-                                    if (tokens.get(i).equals(param.getName()))
-                                    {
-                                        token = true;
-                                        break;
-                                    }
-                                }
-                                else
-                                {
-                                    if (tokens.get(i).equalsIgnoreCase(param.getName()))
-                                    {
-                                        token = true;
-                                        break;
-                                    }
+                                    token = true;
+                                    break;
                                 }
                             }
                             
@@ -1305,91 +1447,254 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
             return ADD_NEW_ISSUE;
         }
     }
+}
     
-    class CSRFScanIssue implements IScanIssue
+class CSRFScanIssue implements IScanIssue
+{
+    private final String name, severity, confidence, detail;
+    private final IHttpService httpService;
+    private final URL url;
+    private final IHttpRequestResponse[] httpMessages;
+
+    public CSRFScanIssue(String name, IHttpService httpService, URL url, IHttpRequestResponse[] httpMessages, String severity, String confidence, String detail)
     {
-        private final String name, severity, confidence, detail;
-        private final IHttpService httpService;
-        private final URL url;
-        private final IHttpRequestResponse[] httpMessages;
+        this.name = name;
+        this.httpService = httpService;
+        this.url = url;
+        this.httpMessages = httpMessages;
+        this.severity = severity;
+        this.confidence = confidence;
+        this.detail = detail;
+    }
+
+    @Override public URL getUrl()
+    {
+        return url;
+    }
+
+    @Override public String getIssueName()
+    {
+        return name;
+    }
+
+    @Override public int getIssueType()
+    {
+        return 0;
+    }
+
+    @Override public String getSeverity()
+    {
+        return severity;
+    }
+
+    @Override public String getConfidence()
+    {
+        return confidence;
+    }
+
+    @Override public String getIssueBackground()
+    {
+        return "Cross-site Request Forgery (CSRF) is an attack which forces an end user to execute "
+                + "unwanted actions on a web application to which he/she is currently authenticated. "
+                + "With a little help of social engineering (like sending a link via email / chat), "
+                + "an attacker may trick the users of a web application into executing actions of the "
+                + "attacker's choosing. A successful CSRF exploit can compromise end user data and may "
+                + "allow an attacker to perform an account hijack. If the targeted end user is the "
+                + "administrator account, this can compromise the entire web application.";
+    }
+
+    @Override public String getRemediationBackground()
+    {
+        return "The application should implement anti-CSRF tokens into all requests that perform "
+                + " actions which change the application state or which add/modify/delete content. "
+                + "An anti-CSRF token should be a long randomly generated value unique to each user so "
+                + "that attackers cannot easily brute-force it.<br><br>It is important that anti-CSRF tokens "
+                + "are validated when user requests are handled by the application. The application should "
+                + "both verify that the token exists in the request, and also check that it matches the user's current "
+                + "token. If either of these checks fails, the application should reject the request.";
+    }
+
+    @Override public String getIssueDetail()
+    {
+        return detail;
+    }
+
+    @Override public String getRemediationDetail()
+    {
+        return null;
+    }
+
+    @Override public IHttpRequestResponse[] getHttpMessages()
+    {
+        return httpMessages;
+    }
+
+    @Override public IHttpService getHttpService()
+    {
+        return httpService;
+    }
+}
+
+class AddTokenActionListener implements ActionListener
+{
+    private JDialog addToken;
+    private TokenTableModel tokenTableModel;
+    private JTextField value;
+    private ButtonGroup matchType;
+    private JCheckBox caseSensitive;
+
+    public AddTokenActionListener(JDialog addToken, TokenTableModel tokenTableModel, JTextField value, ButtonGroup matchType, JCheckBox caseSensitive)
+    {
+        this.addToken = addToken;
+        this.tokenTableModel = tokenTableModel;
+        this.value = value;
+        this.matchType = matchType;
+        this.caseSensitive = caseSensitive;
+    }
+
+    @Override public void actionPerformed(ActionEvent e)
+    {
+        Token token = null;
         
-        public CSRFScanIssue(String name, IHttpService httpService, URL url, IHttpRequestResponse[] httpMessages, String severity, String confidence, String detail)
+        int matchTypeInt = Integer.parseInt(this.matchType.getSelection().getActionCommand());
+        
+        boolean errors = false;
+        String errorText = "";
+        
+        if (value.getText().length() > 0)
         {
-            this.name = name;
-            this.httpService = httpService;
-            this.url = url;
-            this.httpMessages = httpMessages;
-            this.severity = severity;
-            this.confidence = confidence;
-            this.detail = detail;
+            if (matchTypeInt == 1)
+            {
+                try
+                {
+                    token = new RegexToken(value.getText(), caseSensitive.isSelected());
+                }
+                catch (PatternSyntaxException ex)
+                {
+                    errors = true;
+                    errorText = "Invalid regular expression.";
+                }
+            }
+            else
+            {
+                token = new LiteralToken(value.getText(), caseSensitive.isSelected());
+            }
+        }
+        else
+        {
+            errors = true;
+            errorText = "Please enter a value.";
+        }
+
+        if (errors)
+        {
+            JOptionPane.showMessageDialog(this.addToken, errorText, "Error", JOptionPane.ERROR_MESSAGE);
+        }
+        else
+        {
+            boolean tokenExists = false;
+            for (Token r : tokenTableModel.getArray())
+            {
+                if (r.getValue().equals(token.getValue()) && r.getCaseSensitive() == token.getCaseSensitive() && r.getMatchType() == token.getMatchType())
+                {
+                    tokenExists = true;
+                    break;
+                }
+            }
+
+            if (tokenExists)
+            {
+                JOptionPane.showMessageDialog(this.addToken, "This token already exists.", "Error", JOptionPane.ERROR_MESSAGE);
+            }
+            else
+            {
+                this.tokenTableModel.add(token);
+                this.tokenTableModel.fireTableDataChanged();
+                this.addToken.dispose();
+            }
+        }
+    }
+}
+
+class EditTokenActionListener implements ActionListener
+{
+    private JDialog editToken;
+    private TokenTableModel tokenTableModel;
+    private int index;
+    private JTextField value;
+    private ButtonGroup matchType;
+    private JCheckBox caseSensitive;
+
+    public EditTokenActionListener(JDialog editToken, TokenTableModel tokenTableModel, int index, JTextField value, ButtonGroup matchType, JCheckBox caseSensitive)
+    {
+        this.editToken = editToken;
+        this.tokenTableModel = tokenTableModel;
+        this.index = index;
+        this.value = value;
+        this.matchType = matchType;
+        this.caseSensitive = caseSensitive;
+    }
+
+    @Override public void actionPerformed(ActionEvent e)
+    {
+        Token token = null;
+        
+        int matchTypeInt = Integer.parseInt(this.matchType.getSelection().getActionCommand());
+
+        boolean errors = false;
+        String errorText = "";
+        
+        if (value.getText().length() > 0)
+        {
+            if (matchTypeInt == 1)
+            {
+                try
+                {
+                    token = new RegexToken(value.getText(), caseSensitive.isSelected());
+                }
+                catch (PatternSyntaxException ex)
+                {
+                    errors = true;
+                    errorText = "Invalid regular expression.";
+                }
+            }
+            else
+            {
+                token = new LiteralToken(value.getText(), caseSensitive.isSelected());
+            }
+        }
+        else
+        {
+            errors = true;
+            errorText = "Please enter a value.";
         }
         
-        @Override public URL getUrl()
+        if (errors)
         {
-            return url;
+            JOptionPane.showMessageDialog(this.editToken, errorText, "Error", JOptionPane.ERROR_MESSAGE);
         }
+        else
+        {
+            boolean tokenExists = false;
+            for (Token r : tokenTableModel.getArray())
+            {
+                if (!r.equals(tokenTableModel.getToken(index)) && r.getValue().equals(token.getValue()) && r.getCaseSensitive() == token.getCaseSensitive() && r.getMatchType() == token.getMatchType())
+                {
+                    tokenExists = true;
+                    break;
+                }
+            }
 
-        @Override public String getIssueName()
-        {
-            return name;
+            if (tokenExists)
+            {
+                JOptionPane.showMessageDialog(this.editToken, "This token already exists.", "Error", JOptionPane.ERROR_MESSAGE);
+            }
+            else
+            {
+                this.tokenTableModel.update(this.index, token);
+                this.tokenTableModel.fireTableDataChanged();
+                this.editToken.dispose();
+            }
         }
-
-        @Override public int getIssueType()
-        {
-            return 0;
-        }
-
-        @Override public String getSeverity()
-        {
-            return severity;
-        }
-
-        @Override public String getConfidence()
-        {
-            return confidence;
-        }
-
-        @Override public String getIssueBackground()
-        {
-            return "Cross-site Request Forgery (CSRF) is an attack which forces an end user to execute "
-                    + "unwanted actions on a web application to which he/she is currently authenticated. "
-                    + "With a little help of social engineering (like sending a link via email / chat), "
-                    + "an attacker may trick the users of a web application into executing actions of the "
-                    + "attacker's choosing. A successful CSRF exploit can compromise end user data and may "
-                    + "allow an attacker to perform an account hijack. If the targeted end user is the "
-                    + "administrator account, this can compromise the entire web application.";
-        }
-
-        @Override public String getRemediationBackground()
-        {
-            return "The application should implement anti-CSRF tokens into all requests that perform "
-                    + " actions which change the application state or which add/modify/delete content. "
-                    + "An anti-CSRF token should be a long randomly generated value unique to each user so "
-                    + "that attackers cannot easily brute-force it.<br><br>It is important that anti-CSRF tokens "
-                    + "are validated when user requests are handled by the application. The application should "
-                    + "both verify that the token exists in the request, and also check that it matches the user's current "
-                    + "token. If either of these checks fails, the application should reject the request.";
-        }
-
-        @Override public String getIssueDetail()
-        {
-            return detail;
-        }
-
-        @Override public String getRemediationDetail()
-        {
-            return null;
-        }
-
-        @Override public IHttpRequestResponse[] getHttpMessages()
-        {
-            return httpMessages;
-        }
-
-        @Override public IHttpService getHttpService()
-        {
-            return httpService;
-        }
-        
     }
 }
