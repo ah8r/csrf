@@ -36,6 +36,7 @@ import java.net.URLDecoder;
 import java.text.NumberFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -1068,7 +1069,6 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
         if (!onlyScanInScope.isSelected() || callbacks.isInScope(helpers.analyzeRequest(baseRequestResponse).getUrl()))
         {
             List<IScanIssue> issues = new ArrayList<>();
-            List<int[]> noTokenRequestQueryHighlights = new ArrayList<>();
             List<int[]> noTokenRequestHighlights = new ArrayList<>();
             List<int[]> noTokenFormsHighlights = new ArrayList<>();
             
@@ -1094,6 +1094,18 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
             if (methods.contains(request.getMethod()))
             {
                 List<IParameter> params = request.getParameters();
+                
+                // Remove invalid parameters (i.e. cookies)
+                for (Iterator<IParameter> iterator = params.iterator(); iterator.hasNext();)
+                {
+                    IParameter param = iterator.next();
+                    
+                    if (param.getType() == IParameter.PARAM_COOKIE)
+                    {
+                        iterator.remove();
+                    }
+                }
+                
                 if (reportNoParams.isSelected() || !params.isEmpty())
                 {
                     List<String> headers = request.getHeaders();
@@ -1219,7 +1231,7 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                             if (query != null)
                             {
                                 int queryStart = new String(baseRequestResponse.getRequest()).indexOf(query);
-                                noTokenRequestQueryHighlights.add(new int[] {queryStart, queryStart + query.length()});
+                                noTokenRequestHighlights.add(new int[] {queryStart, queryStart + query.length()});
                             }
                             noTokenRequestHighlights.add(new int[] {requestOffset, requestOffset + requestBody.length()});
                         }
@@ -1295,47 +1307,17 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                 }
             }
 
-            if (!noTokenRequestQueryHighlights.isEmpty() && !noTokenRequestHighlights.isEmpty())
-            {
-                noTokenRequestQueryHighlights.addAll(noTokenRequestHighlights);
-                
+            if (!noTokenRequestHighlights.isEmpty())
+            {                
                 issues.add(new CSRFScanIssue(
                         NO_TOKEN_IN_REQUEST_PARAMS,
                         baseRequestResponse.getHttpService(),
                         helpers.analyzeRequest(baseRequestResponse).getUrl(), 
-                        new IHttpRequestResponse[] { callbacks.applyMarkers(baseRequestResponse, noTokenRequestQueryHighlights, null)},
+                        new IHttpRequestResponse[] { callbacks.applyMarkers(baseRequestResponse, noTokenRequestHighlights, null)},
                         "High",
                         "Tentative",
-                        "The request parameters do not appear to contain an anti-CSRF token."
+                        "The request does not appear to contain an anti-CSRF token."
                     ));
-            }
-            else
-            {
-                if (!noTokenRequestQueryHighlights.isEmpty())
-                {
-                    issues.add(new CSRFScanIssue(
-                        NO_TOKEN_IN_REQUEST_PARAMS,
-                        baseRequestResponse.getHttpService(),
-                        helpers.analyzeRequest(baseRequestResponse).getUrl(), 
-                        new IHttpRequestResponse[] {callbacks.applyMarkers(baseRequestResponse, noTokenRequestQueryHighlights, null)},
-                        "High",
-                        "Tentative",
-                        "The request URL parameters do not appear to contain an anti-CSRF token."
-                    ));
-                }
-
-                if (!noTokenRequestHighlights.isEmpty())
-                {
-                    issues.add(new CSRFScanIssue(
-                        NO_TOKEN_IN_REQUEST_PARAMS,
-                        baseRequestResponse.getHttpService(),
-                        helpers.analyzeRequest(baseRequestResponse).getUrl(), 
-                        new IHttpRequestResponse[] {callbacks.applyMarkers(baseRequestResponse, noTokenRequestHighlights, null)},
-                        "High",
-                        "Tentative",
-                        "The request body parameters do not appear to contain an anti-CSRF token."
-                    ));
-                }
             }
             
             if (!foundTokenRequestHighlights.isEmpty())
@@ -1347,7 +1329,7 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                     new IHttpRequestResponse[] { callbacks.applyMarkers(baseRequestResponse, foundTokenRequestHighlights, null)},
                     "Information",
                     "Firm",
-                    "The request parameters appear to contain an anti-CSRF token. It is suggested that the request "
+                    "The request appears to contain an anti-CSRF token. It is suggested that the request "
                         + "be replayed both without and with a modified token to see if it is implemented properly."
                 ));
             }
@@ -1361,7 +1343,7 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                     new IHttpRequestResponse[] { callbacks.applyMarkers(baseRequestResponse, minRequestTokenLengthHighlights, null)},
                     "Medium",
                     "Firm",
-                    "The request parameters appear to contain an anti-CSRF token with a value that is "
+                    "The request appears to contain an anti-CSRF token with a value that is "
                         + "less than " + minTokenLength + " characters long. An attacker may be able to guess "
                         + "this token's value."
                 ));
@@ -1479,7 +1461,7 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                     List<IParameter> newParams = new LinkedList<IParameter>();
                     for (IParameter param : originalNewParams)
                     {
-                        if (param.getType() == IParameter.PARAM_BODY || param.getType() == IParameter.PARAM_URL)
+                        if (param.getType() != IParameter.PARAM_COOKIE)
                         {
                             if (newIssue.getIssueName().equals(TOKEN_IN_REQUEST_PARAMS)) // Prevents duplicate tokens being reported.
                             {
@@ -1509,7 +1491,7 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                     List<IParameter> existingParams = new LinkedList<IParameter>();
                     for (IParameter param : originalExistingParams)
                     {
-                        if (param.getType() == IParameter.PARAM_BODY || param.getType() == IParameter.PARAM_URL)
+                        if (param.getType() != IParameter.PARAM_COOKIE)
                         {
                             if (existingIssue.getIssueName().equals(TOKEN_IN_REQUEST_PARAMS)) // Prevents duplicate tokens being reported.
                             {
@@ -1550,7 +1532,7 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
 
                                 for (IParameter existingParam : existingParams)
                                 {
-                                    if (newParam.getName().equals(existingParam.getName()) && newParam.getValue().equals(existingParam.getValue()))
+                                    if (newParam.getType() == existingParam.getType() && newParam.getName().equals(existingParam.getName()) && newParam.getValue().equals(existingParam.getValue()))
                                     {
                                         paramsMatch = true;
                                         break;
