@@ -1257,6 +1257,10 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                     end = responseBody.indexOf(FORM_CLOSE_MATCHER.group(), next) + FORM_CLOSE_MATCHER.group().length();
                     next = end;
                     
+                    if (start == -1 || end == -1)
+                    {
+                        continue;
+                    }
                     Document doc = Jsoup.parse("<html><head></head><body>" + responseBody.substring(start, end) + "</body></html>");
                     token = false;
                     tokenValue = "";
